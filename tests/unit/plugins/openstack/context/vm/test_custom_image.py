@@ -18,6 +18,7 @@
 import mock
 
 from rally.plugins.openstack.context.vm import custom_image
+from rally.plugins.openstack.scenarios.vm import vmtasks
 from rally.task import context
 from tests.unit import test
 
@@ -36,16 +37,17 @@ class BaseCustomImageContextVMTestCase(test.TestCase):
     def setUp(self):
         super(BaseCustomImageContextVMTestCase, self).setUp()
 
+        self.config = {
+            "image": {"name": "image"},
+            "flavor": {"name": "flavor"},
+            "username": "fedora",
+            "floating_network": "floating",
+            "port": 1022,
+        }
         self.context = {
             "task": mock.MagicMock(),
             "config": {
-                "test_custom_image": {
-                    "image": {"name": "image"},
-                    "flavor": {"name": "flavor"},
-                    "username": "fedora",
-                    "floating_network": "floating",
-                    "port": 1022,
-                }
+                "test_custom_image": self.config
             },
             "admin": {
                 "endpoint": "endpoint",
@@ -62,29 +64,20 @@ class BaseCustomImageContextVMTestCase(test.TestCase):
             }
         }
 
-    @mock.patch("%s.vmtasks.VMTasks" % BASE)
-    @mock.patch("%s.osclients.Clients" % BASE)
-    @mock.patch("%s.types.ImageResourceType.transform" % BASE,
-                return_value="image")
-    @mock.patch("%s.types.FlavorResourceType.transform" % BASE,
-                return_value="flavor")
-    def test_create_one_image(
-            self, mock_flavor_resource_type_transform,
-            mock_image_resource_type_transform, mock_clients, mock_vm_tasks):
+    def test_create_one_image(self):
         ip = {"ip": "foo_ip", "id": "foo_id", "is_floating": True}
         fake_server = mock.Mock()
 
         fake_image = mock.MagicMock(
             to_dict=mock.MagicMock(return_value={"id": "image"}))
 
-        mock_vm_scenario = mock_vm_tasks.return_value = mock.MagicMock(
-            _create_image=mock.MagicMock(return_value=fake_image),
-            _boot_server_with_fip=mock.MagicMock(
-                return_value=(fake_server, ip)),
-            _generate_random_name=mock.MagicMock(return_value="foo_name"),
+        mock_vm_scenario = mock.MagicMock(
+            **{"_create_image.return_value": fake_image}
         )
 
         generator_ctx = TestImageGenerator(self.context)
+        generator_ctx._boot_server_for_user = mock.MagicMock(
+            return_value=(mock_vm_scenario, fake_server, ip))
         generator_ctx._customize_image = mock.MagicMock()
 
         user = {
@@ -96,25 +89,20 @@ class BaseCustomImageContextVMTestCase(test.TestCase):
         custom_image = generator_ctx.create_one_image(user,
                                                       foo_arg="foo_value")
 
-        mock_flavor_resource_type_transform.assert_called_once_with(
-            clients=mock_clients.return_value,
-            resource_config={"name": "flavor"})
-        mock_image_resource_type_transform.assert_called_once_with(
-            clients=mock_clients.return_value,
-            resource_config={"name": "image"})
-        mock_vm_tasks.assert_called_once_with(
-            self.context, clients=mock_clients.return_value)
-
-        mock_vm_scenario._boot_server_with_fip.assert_called_once_with(
-            image="image", flavor="flavor",
-            name="foo_name", floating_network="floating",
-            key_name="keypair_name", security_groups=["secgroup_name"],
-            userdata=None, foo_arg="foo_value")
-
-        mock_vm_scenario._stop_server.assert_called_once_with(fake_server)
+        generator_ctx._boot_server_for_user.assert_called_once_with(
+            image=self.config["image"],
+            flavor=self.config["flavor"],
+            user=user,
+            prefix="rally_ctx_custom_image_",
+            floating_network="floating",
+            userdata=None,
+            foo_arg="foo_value",
+            vm_scenario_cls=vmtasks.VMTasks)
 
         generator_ctx._customize_image.assert_called_once_with(
             fake_server, ip, user)
+
+        mock_vm_scenario._stop_server.assert_called_once_with(fake_server)
 
         mock_vm_scenario._create_image.assert_called_once_with(fake_server)
 
@@ -123,29 +111,20 @@ class BaseCustomImageContextVMTestCase(test.TestCase):
 
         self.assertEqual({"id": "image"}, custom_image)
 
-    @mock.patch("%s.vmtasks.VMTasks" % BASE)
-    @mock.patch("%s.osclients.Clients" % BASE)
-    @mock.patch("%s.types.ImageResourceType.transform" % BASE,
-                return_value="image")
-    @mock.patch("%s.types.FlavorResourceType.transform" % BASE,
-                return_value="flavor")
-    def test_create_one_image_cleanup(
-            self, mock_flavor_resource_type_transform,
-            mock_image_resource_type_transform, mock_clients, mock_vm_tasks):
+    def test_create_one_image_cleanup(self):
         ip = {"ip": "foo_ip", "id": "foo_id", "is_floating": True}
         fake_server = mock.Mock()
 
         fake_image = mock.MagicMock(
             to_dict=mock.MagicMock(return_value={"id": "image"}))
 
-        mock_vm_scenario = mock_vm_tasks.return_value = mock.MagicMock(
-            _create_image=mock.MagicMock(return_value=fake_image),
-            _boot_server_with_fip=mock.MagicMock(
-                return_value=(fake_server, ip)),
-            _generate_random_name=mock.MagicMock(return_value="foo_name"),
+        mock_vm_scenario = mock.MagicMock(
+            **{"_create_image.return_value": fake_image}
         )
 
         generator_ctx = TestImageGenerator(self.context)
+        generator_ctx._boot_server_for_user = mock.MagicMock(
+            return_value=(mock_vm_scenario, fake_server, ip))
         generator_ctx._customize_image = mock.MagicMock(
             side_effect=ValueError())
 

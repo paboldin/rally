@@ -23,17 +23,18 @@ from rally.common import log as logging
 from rally.common import utils
 from rally import consts
 from rally import osclients
+from rally.plugins.openstack.context.vm import utils as context_vm_utils
 from rally.plugins.openstack.scenarios.nova import utils as nova_utils
 from rally.plugins.openstack.scenarios.vm import vmtasks
 from rally.task import context
-from rally.task import types
 
 LOG = logging.getLogger(__name__)
 
 
 @six.add_metaclass(abc.ABCMeta)
 @context.configure(name="custom_image", order=500, hidden=True)
-class BaseCustomImageGenerator(context.Context):
+class BaseCustomImageGenerator(context.Context,
+                               context_vm_utils.BootOneServerMixin):
     """Base class for the contexts providing customized image with.
 
     Every context class for the specific customization must implement
@@ -145,23 +146,18 @@ class BaseCustomImageGenerator(context.Context):
     def create_one_image(self, user, **kwargs):
         """Create one image for the user."""
 
-        clients = osclients.Clients(user["endpoint"])
-
-        image_id = types.ImageResourceType.transform(
-            clients=clients, resource_config=self.config["image"])
-        flavor_id = types.FlavorResourceType.transform(
-            clients=clients, resource_config=self.config["flavor"])
-
-        vm_scenario = vmtasks.VMTasks(self.context, clients=clients)
-
-        server, fip = vm_scenario._boot_server_with_fip(
-            name=vm_scenario._generate_random_name("rally_ctx_custom_image_"),
-            image=image_id, flavor=flavor_id,
+        vm_scenario, server, fip = self._boot_server_for_user(
+            user=user,
+            image=self.config["image"],
+            flavor=self.config["flavor"],
             floating_network=self.config.get("floating_network"),
             userdata=self.config.get("userdata"),
-            key_name=user["keypair"]["name"],
-            security_groups=[user["secgroup"]["name"]],
-            **kwargs)
+            prefix="rally_ctx_custom_image_",
+            vm_scenario_cls=vmtasks.VMTasks,
+            **kwargs
+        )
+
+        vm_scenario._wait_for_ping(fip["ip"])
 
         try:
             LOG.debug("Installing benchmark on %r %s", server, fip["ip"])
