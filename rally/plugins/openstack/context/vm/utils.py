@@ -20,6 +20,7 @@ from rally.task import types
 
 class BootOneServerMixin(object):
 
+    # TODO(pboldin): should I move this to vm_scenario?
     def _boot_server_for_user(self, user, image, flavor, prefix, **kwargs):
 
         clients = osclients.Clients(user["endpoint"])
@@ -35,6 +36,7 @@ class BootOneServerMixin(object):
             kwargs.setdefault("security_groups", [user["secgroup"]["name"]])
 
         vm_scenario_cls = kwargs.pop("vm_scenario_cls", vm_utils.VMScenario)
+        # TODO(pboldin): Would it be better to pass vm_scenario to this method?
         vm_scenario = vm_scenario_cls(self.context, clients=clients)
 
         if kwargs.get("name") is None:
