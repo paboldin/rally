@@ -53,6 +53,21 @@ class ImageCommandCustomizerContextVMTestCase(test.TestCase):
         self.user = {"keypair": {"private": "foo_private"}}
         self.fip = {"ip": "foo_ip"}
 
+    def get_context_with_commands(self):
+        self.context["config"]["image_command_customizer"].pop("command")
+        self.context["config"]["image_command_customizer"]["commands"] = [
+            {
+                "interpreter": "foo_interpreter",
+                "script_file": "foo_script"
+            },
+            {
+                "interpreter": "bar_interpreter",
+                "script_file": "bar_script"
+            }
+        ]
+
+        return self.context
+
     @mock.patch("%s.vm_utils.VMScenario" % BASE)
     def test_customize_image(self, mock_vm_scenario):
         mock_vm_scenario.return_value._run_command.return_value = (
@@ -71,6 +86,42 @@ class ImageCommandCustomizerContextVMTestCase(test.TestCase):
                      "script_file": "foo_script"})
 
         self.assertEqual((0, "foo_stdout", "foo_stderr"), retval)
+
+    @mock.patch("%s.vm_utils.VMScenario" % BASE)
+    def test_customize_image_commands(self, mock_vm_scenario):
+        mock_vm_scenario.return_value._run_command.side_effect = [
+            (0, "foo_stdout", "foo_stderr"),
+            (0, "bar_stdout", "bar_stderr")
+        ]
+
+        context = self.get_context_with_commands()
+
+        customizer = image_command_customizer.ImageCommandCustomizerContext(
+            context)
+
+        retval = customizer.customize_image(server=None, ip=self.fip,
+                                            user=self.user)
+
+        mock_vm_scenario.assert_called_once_with(customizer.context)
+        self.assertEqual(
+            [
+                mock.call(
+                    "foo_ip", 1022, "fedora", "foo_password",
+                    pkey="foo_private",
+                    command={"interpreter": "foo_interpreter",
+                             "script_file": "foo_script"}),
+                mock.call(
+                    "foo_ip", 1022, "fedora", "foo_password",
+                    pkey="foo_private",
+                    command={"interpreter": "bar_interpreter",
+                             "script_file": "bar_script"})
+            ],
+            mock_vm_scenario.return_value._run_command.mock_calls)
+
+        self.assertEqual(
+            (0, "foo_stdout\n===============\nbar_stdout",
+             "foo_stderr\n===============\nbar_stderr"),
+            retval)
 
     @mock.patch("%s.vm_utils.VMScenario" % BASE)
     def test_customize_image_fail(self, mock_vm_scenario):
@@ -92,3 +143,39 @@ class ImageCommandCustomizerContextVMTestCase(test.TestCase):
             "foo_ip", 1022, "fedora", "foo_password", pkey="foo_private",
             command={"interpreter": "foo_interpreter",
                      "script_file": "foo_script"})
+
+    @mock.patch("%s.vm_utils.VMScenario" % BASE)
+    def test_customize_image_commands_fail(self, mock_vm_scenario):
+        mock_vm_scenario.return_value._run_command.side_effect = [
+            (0, "foo_stdout", "foo_stderr"),
+            (2, "bar_stdout", "bar_stderr")
+        ]
+
+        context = self.get_context_with_commands()
+
+        customizer = image_command_customizer.ImageCommandCustomizerContext(
+            context)
+
+        exc = self.assertRaises(
+            exceptions.ScriptError, customizer.customize_image,
+            server=None, ip=self.fip, user=self.user)
+
+        str_exc = str(exc)
+        self.assertIn("bar_stdout", str_exc)
+        self.assertIn("bar_stderr", str_exc)
+
+        mock_vm_scenario.assert_called_once_with(customizer.context)
+        self.assertEqual(
+            [
+                mock.call(
+                    "foo_ip", 1022, "fedora", "foo_password",
+                    pkey="foo_private",
+                    command={"interpreter": "foo_interpreter",
+                             "script_file": "foo_script"}),
+                mock.call(
+                    "foo_ip", 1022, "fedora", "foo_password",
+                    pkey="foo_private",
+                    command={"interpreter": "bar_interpreter",
+                             "script_file": "bar_script"})
+            ],
+            mock_vm_scenario.return_value._run_command.mock_calls)

@@ -76,17 +76,43 @@ class ImageCommandCustomizerContext(custom_image.BaseCustomImageGenerator):
                 {"$ref": "#/definitions/scriptInline"},
                 {"$ref": "#/definitions/commandPath"},
             ],
+        },
+        "commandsList": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"$ref": "#/definitions/commandDict"}
         }
     }
     CONFIG_SCHEMA["properties"]["command"] = {
         "$ref": "#/definitions/commandDict"
     }
+    CONFIG_SCHEMA["properties"]["commands"] = {
+        "$ref": "#/definitions/commandsList"
+    }
 
     def _customize_image(self, server, fip, user):
-        code, out, err = vm_utils.VMScenario(self.context)._run_command(
+        commands = [self.config.get("command")]
+        if self.config.get("commands"):
+            commands = self.config.get("commands")
+
+        vm_scenario = vm_utils.VMScenario(self.context)
+
+        combined_out, combined_err = [], []
+        for command in commands:
+            x, out, err = self._run_one_command(
+                vm_scenario, command, server, fip, user)
+            combined_out.append(out)
+            combined_err.append(err)
+
+        combined_out = "\n===============\n".join(combined_out)
+        combined_err = "\n===============\n".join(combined_err)
+        return 0, combined_out, combined_err
+
+    def _run_one_command(self, vm_scenario, command, server, fip, user):
+        code, out, err = vm_scenario._run_command(
             fip["ip"], self.config["port"],
             self.config["username"], self.config.get("password"),
-            command=self.config["command"],
+            command=command,
             pkey=user["keypair"]["private"])
 
         if code:
@@ -98,7 +124,7 @@ class ImageCommandCustomizerContext(custom_image.BaseCustomImageGenerator):
                 "STDERR:\n============================\n"
                 "%(err)s\n"
                 "============================\n"
-                % {"command": self.config["command"], "code": code,
+                % {"command": command, "code": code,
                    "out": out, "err": err})
 
         return code, out, err
