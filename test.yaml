@@ -1,0 +1,46 @@
+  VMTasks.runcommand_agents:
+    -
+      args:
+        actor_command: "/usr/bin/start_iperf.sh"
+        reduction_command: "./process_iperf.py"
+        expected_runtime: 70
+        can_run_off: 1
+      runner:
+        concurrency: 1
+        timeout: 3000
+        times: 1
+        type: constant
+      context:
+        image_command_customizer:
+          commands:
+            - local_path: "./agent_installer.sh"
+              remote_path: "./agent_installer.sh"
+            - local_path: "./iperf_installer.sh"
+              remote_path: "./iperf_installer.sh"
+          flavor:
+            name: rally_ubuntu
+          image:
+            name: "^ubuntu$"
+          username: root
+          userdata: "#cloud-config\ndisable_root: 0\nssh_pwauth: 1"
+        network: {}
+        servers_ext:
+          servers_per_tenant: "hypervisors"
+          placement_policy: "anti-affinity"
+          flavor:
+            name: rally_ubuntu
+          image:
+            name: "^rally_ctx_custom_image_"
+          floating_ips: "once"
+          userdata: |
+            #cloud-config
+            write_files:
+            -   content:  |
+                  # Master Agent Host
+
+                  ZMQ_MASTER_AGENT_HOST={servers_with_ips[0][2]}
+                  AGENT_ID={server_num}
+                path: /opt/rally-agent/master-agent-host
+        users:
+          tenants: 1
+          users_per_tenant: 1
