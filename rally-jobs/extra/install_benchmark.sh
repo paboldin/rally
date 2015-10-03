@@ -3,7 +3,7 @@
 set -e
 
 main() {
-    cat > ~/dd_test.sh <<'EOF'
+    cat > /usr/bin/dd_test.sh <<'EOF'
 #!/bin/sh
 time_seconds(){ (time -p $1 ) 2>&1 |awk '/real/{print $2}'; }
 file=/tmp/test.img
@@ -18,7 +18,7 @@ echo "{
     }"
 EOF
 
-    chmod a+x ~/dd_test.sh
+    chmod a+x /usr/bin/dd_test.sh
 }
 
 main

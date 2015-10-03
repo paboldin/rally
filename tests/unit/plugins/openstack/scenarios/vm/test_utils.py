@@ -310,3 +310,102 @@ class VMScenarioTestCase(test.ScenarioTestCase):
                                           self.context["task"])
         mock_wrap.return_value.delete_floating_ip.assert_called_once_with(
             "foo_id", wait=True)
+
+    @mock.patch(VMTASKS_UTILS + ".subprocess.Popen")
+    @mock.patch(VMTASKS_UTILS + ".json")
+    def test__process_agent_commands_output(
+            self, mock_json, mock_subprocess_popen):
+        scenario = utils.VMScenario(self.context)
+
+        mock_subprocess_popen.return_value.communicate.return_value = (
+            "stdout", "stderr")
+
+        mock_stdout = test.NamedMock(name_="stdout")
+        mock_stderr = test.NamedMock(name_="stderr")
+        run_result = {
+            "stdout": {"0": mock_stdout},
+            "stderr": {"0": mock_stderr}
+        }
+
+        retval = scenario._process_agent_commands_output(
+            "reduction_command", run_result)
+
+        mock_stdout.flush.assert_called_once_with()
+        mock_stderr.flush.assert_called_once_with()
+
+        mock_json.dumps.assert_called_once_with(
+            {
+                "stdout": {"0": "stdout"},
+                "stderr": {"0": "stderr"},
+            })
+
+        mock_subprocess_popen.assert_called_once_with(
+            "reduction_command",
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        mock_subprocess_popen.return_value.communicate.assert_called_once_with(
+            mock_json.dumps.return_value)
+
+        mock_json.loads.assert_called_once_with("stdout")
+
+        self.assertEqual(
+            mock_json.loads.return_value,
+            retval)
+
+    @mock.patch(VMTASKS_UTILS + ".agent_api.SwarmConnection")
+    def test__run_command_swarm(self, mock_agent_api_swarm_connection):
+        scenario = utils.VMScenario(self.context)
+
+        scenario._wait_for_swarm_ping = mock.Mock()
+
+        servers_with_ips = [
+            (0, {"ip": "foobar"}, "there"),
+            (0, {"ip": "barfoo"}, "here"),
+            (0, None, "onmoon")
+        ]
+        command_with_args = "all your base belongs to us"
+
+        scenario._run_command_swarm(
+            command_with_args,
+            servers_with_ips,
+            expected_runtime=137,
+            can_run_off=42)
+
+        mock_agent_api_swarm_connection.assert_called_once_with(
+            "http://foobar:8080", 3)
+        swarm_connection = mock_agent_api_swarm_connection.return_value
+
+        scenario._wait_for_swarm_ping.assert_called_once_with(swarm_connection)
+
+        swarm_connection.run_command_thread.assert_called_once_with(
+            [command_with_args],
+            env=[
+                "AGENT_ID=None",
+                "AGENTS_TOTAL=3",
+                "FLOATING_IP0=foobar",
+                "FIXED_IP0=there",
+                "FLOATING_IP1=barfoo",
+                "FIXED_IP1=here",
+                "FIXED_IP2=onmoon",
+            ]
+        )
+
+        swarm_connection.wait.assert_called_once_with(42)
+
+    def test__wait_for_swarm_ping(self):
+        scenario = utils.VMScenario(self.context)
+
+        swarm_connection = mock.Mock()
+
+        scenario._wait_for_swarm_ping(swarm_connection)
+
+        self.mock_wait_for.mock.assert_called_once_with(
+            None,
+            is_ready=self.mock_resource_is.mock.return_value,
+            timeout=CONF.benchmark.vm_swarm_ping_timeout,
+            check_interval=CONF.benchmark.vm_swarm_ping_poll_interval
+        )
+        self.mock_resource_is.mock.assert_called_once_with(
+            "UP ALL", swarm_connection.status)

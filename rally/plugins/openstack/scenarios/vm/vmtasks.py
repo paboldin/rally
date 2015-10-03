@@ -204,3 +204,34 @@ class VMTasks(vm_utils.VMScenario):
 
         return self.boot_runcommand_delete(
             image=self.context["tenant"]["custom_image"]["id"], **kwargs)
+
+    @validation.required_openstack(users=True)
+    @validation.required_contexts("image_command_customizer")
+    @validation.required_contexts("servers_ext")
+    @scenario.configure(context={"cleanup": ["nova", "cinder"],
+                                 "keypair": {}, "allow_ssh": {}})
+    def runcommand_agents(self, actor_command, reduction_command,
+                          expected_runtime=None, can_run_off=0):
+        """Run a command on a VMs provided by servers_ext via running agents.
+
+        :param actor_command: A command (path and args) to execute on
+            the agents. Output format is not restricted. A local script
+            specified by reduction_command is fed with the outputs.
+        :param reduction_command: A local filter script to process output of
+            commands ran on the swarm. Input format is a JSON object. Keys are
+            "stdout", "stderr" and "exit_code" and each value is an object with
+            keys of agent IDs as strings. "Stdout" and "stderr" contain paths
+            to the temporary files which contain the appropriate pipe content.
+            Per-agent exit code of the executed application is stored in the
+            "exit_code" object. Some of the values may be None due to some of
+            the processes running off.
+        :param expected_runtime: Amount of seconds to sleep before starting
+            to poll for outputs and exit codes.
+        :param can_run_off: Specifies how many processes can run off. This is
+            required when some of the scripts do run a servers.
+        """
+
+        output = self._run_command_swarm(
+            actor_command, self.context["tenant"]["servers_with_ips"],
+            expected_runtime, can_run_off)
+        return self._process_agent_commands_output(reduction_command, output)

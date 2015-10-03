@@ -13,8 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import json
 import subprocess
 import sys
+import time
 
 import netaddr
 from oslo_config import cfg
@@ -23,6 +25,7 @@ import six
 from rally.common.i18n import _
 from rally.common import log as logging
 from rally.common import sshutils
+from rally.plugins.agent import api as agent_api
 from rally.plugins.openstack.scenarios.cinder import utils as cinder_utils
 from rally.plugins.openstack.scenarios.nova import utils as nova_utils
 from rally.plugins.openstack.wrappers import network as network_wrapper
@@ -40,7 +43,12 @@ VM_BENCHMARK_OPTS = [
                  help="Interval between checks when waiting for a VM to "
                  "become pingable"),
     cfg.FloatOpt("vm_ping_timeout", default=120.0,
-                 help="Time to wait for a VM to become pingable")]
+                 help="Time to wait for a VM to become pingable"),
+    cfg.FloatOpt("vm_swarm_ping_poll_interval", default=5.0,
+                 help="Interval between checks when waiting for a VM swarm "
+                 "to become pingable"),
+    cfg.FloatOpt("vm_swarm_ping_timeout", default=600.0,
+                 help="Time to wait for a VM swarm to become pingable")]
 
 CONF = cfg.CONF
 benchmark_group = cfg.OptGroup(name="benchmark", title="benchmark options")
@@ -167,6 +175,79 @@ class VMScenario(nova_utils.NovaScenario, cinder_utils.CinderScenario):
             timeout=CONF.benchmark.vm_ping_timeout,
             check_interval=CONF.benchmark.vm_ping_poll_interval
         )
+
+    @atomic.action_timer("vm.wait_for_swarm_ping")
+    def _wait_for_swarm_ping(self, swarm_connection):
+        utils.wait_for(
+            None,
+            is_ready=utils.resource_is(
+                "UP ALL",
+                swarm_connection.status),
+            timeout=CONF.benchmark.vm_swarm_ping_timeout,
+            check_interval=CONF.benchmark.vm_swarm_ping_poll_interval
+        )
+
+    def _run_command_swarm(self, command_with_args, servers_with_ips,
+                           expected_runtime=None, can_run_off=0):
+        fip = servers_with_ips[0][1]
+        http_url = "http://%s:8080" % fip["ip"]
+
+        agents = len(servers_with_ips)
+
+        swarm_connection = agent_api.SwarmConnection(http_url, agents)
+
+        self._wait_for_swarm_ping(swarm_connection)
+
+        env = [
+            "AGENT_ID=None",
+            "AGENTS_TOTAL=%d" % agents
+        ]
+
+        for n, server_with_ips in enumerate(servers_with_ips):
+            x, floating_ip, fixed_ip = server_with_ips
+            if floating_ip:
+                env.append(
+                    "FLOATING_IP%d=%s" % (n, floating_ip["ip"]))
+            env.append("FIXED_IP%d=%s" % (n, fixed_ip))
+
+        if not isinstance(command_with_args, list):
+            command_with_args = [command_with_args]
+
+        swarm_connection.run_command_thread(command_with_args, env=env)
+
+        if expected_runtime is not None:
+            time.sleep(expected_runtime)
+
+        return swarm_connection.wait(can_run_off)
+
+    @staticmethod
+    def _replace_fh_with_name(d, fhs):
+        for agent_id, fh in d.items():
+            fh.flush()
+            d[agent_id] = fh.name
+            fhs.append(fh)
+
+    def _process_agent_commands_output(self, reduction_command, run_result):
+        # NOTE(pboldin): We need to temporary keep fhs so the appropriate
+        # temporary files are not removed until this function returns
+        fhs = []
+        self._replace_fh_with_name(run_result["stdout"], fhs)
+        self._replace_fh_with_name(run_result["stderr"], fhs)
+
+        stdin = json.dumps(run_result)
+        LOG.debug("Dumping %s into stdin." % stdin)
+
+        process = subprocess.Popen(
+            reduction_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        stdout, stderr = process.communicate(stdin)
+        LOG.debug("Got STDOUT:\n\n%s\n\nGot STDERR\n\n%s\n\n" %
+                  (stdout, stderr))
+
+        return json.loads(stdout)
 
     def _run_command(self, server_ip, port, username, password, command,
                      pkey=None):

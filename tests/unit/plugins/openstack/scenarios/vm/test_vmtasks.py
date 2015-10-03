@@ -144,3 +144,31 @@ class VMTasksTestCase(test.ScenarioTestCase):
                 "script_file": "foo_script",
                 "interpreter": "bar_interpreter"}
         )
+
+    def test_runcommand_agents(self):
+        context = {
+            "user": {
+                "tenant_id": "tenant_id",
+                "endpoint": mock.Mock()
+            },
+            "tenant": {
+                "servers_with_ips": "a list"
+            }
+        }
+        scenario = vmtasks.VMTasks(context)
+
+        scenario._run_command_swarm = mock.Mock()
+        scenario._process_agent_commands_output = mock.Mock()
+
+        retval = scenario.runcommand_agents(
+            "foo_actor", "bar_reductor", 42, 137)
+
+        scenario._run_command_swarm.assert_called_once_with(
+            "foo_actor", "a list", 42, 137)
+
+        scenario._process_agent_commands_output.assert_called_once_with(
+            "bar_reductor", scenario._run_command_swarm.return_value)
+
+        self.assertEqual(
+            scenario._process_agent_commands_output.return_value,
+            retval)

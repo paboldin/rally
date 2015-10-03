@@ -1,0 +1,61 @@
+  VMTasks.runcommand_agents:
+    -
+      args:
+        actor_command: "/usr/bin/dd_test.sh"
+        reduction_command:
+        - "/usr/bin/python"
+        - "samples/tasks/scenarios/vm/process_dd_test.py"
+        expected_runtime: 5
+      runner:
+        concurrency: 1
+        timeout: 3000
+        times: 1
+        type: constant
+      context:
+        flavors:
+          -
+            name: "vm.ubuntu"
+            ram: 512
+            disk: 4
+        image_command_customizer:
+          commands:
+            - local_path: "samples/tasks/contexts/vm/agent_installer.sh"
+              remote_path: "./agent_installer.sh"
+              command_args: ["preinstall"]
+            - local_path: "rally/plugins/agent/agent.py"
+              remote_path: ["/usr/bin/python", "./agent.py"]
+              command_args: ["--help"]
+            - local_path: "rally/plugins/agent/masteragent.py"
+              remote_path: ["/usr/bin/python", "./masteragent.py"]
+              command_args: ["--help"]
+            - remote_path: "./agent_installer.sh"
+              command_args: ["install"]
+            - local_path: "rally-jobs/extra/install_benchmark.sh"
+              remote_path: "./install_benchmark.sh"
+          flavor:
+            name: "^vm.ubuntu$"
+          image:
+            name: "^ubuntu$"
+          username: root
+          userdata: "#cloud-config\ndisable_root: 0\nssh_pwauth: 1"
+        network: {}
+        servers_ext:
+          servers_per_tenant: "hypervisors"
+          placement_policy: "anti-affinity"
+          flavor:
+            name: "^vm.ubuntu$"
+          image:
+            name: "^rally_ctx_custom_image_"
+          floating_ips: "once"
+          userdata: |
+            #cloud-config
+            write_files:
+            -   content:  |
+                  # Master Agent Host
+
+                  ZMQ_MASTER_AGENT_HOST={servers_with_ips[0][2]}
+                  AGENT_ID={server_num}
+                path: /opt/rally-agent/master-agent-host
+        users:
+          tenants: 1
+          users_per_tenant: 1

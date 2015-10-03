@@ -709,7 +709,7 @@
     -
       args:
         command:
-          remote_path: "./dd_test.sh"
+          remote_path: "/usr/bin/dd_test.sh"
         flavor:
           name: "m1.tiny"
         username: "cirros"
