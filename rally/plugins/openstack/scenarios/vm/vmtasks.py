@@ -204,3 +204,20 @@ class VMTasks(vm_utils.VMScenario):
 
         return self.boot_runcommand_delete(
             image=self.context["tenant"]["custom_image"]["id"], **kwargs)
+
+    @validation.required_openstack(users=True)
+    @validation.required_contexts("image_command_customizer")
+    @validation.required_contexts("servers_ext")
+    @scenario.configure(context={"cleanup": ["nova", "cinder"],
+                                 "keypair": {}, "allow_ssh": {}})
+    def runcommand_agents(self, actor_command, reduction_command,
+                          expected_runtime=None, can_run_off=0):
+        """Boot a server from a custom image, run a command that outputs JSON.
+
+        Example Script in rally-jobs/extra/script_benchmark.sh
+        """
+
+        output = self._agent_run_command(
+            actor_command, self.context["tenant"]["servers_with_ips"],
+            expected_runtime, can_run_off)
+        return self._process_agent_commands_output(reduction_command, output)

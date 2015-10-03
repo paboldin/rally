@@ -310,3 +310,201 @@ class VMScenarioTestCase(test.ScenarioTestCase):
                                           self.context["task"])
         mock_wrap.return_value.delete_floating_ip.assert_called_once_with(
             "foo_id", wait=True)
+
+    @mock.patch(VMTASKS_UTILS + ".subprocess.Popen")
+    @mock.patch(VMTASKS_UTILS + ".json")
+    def test__process_agent_commands_output(
+            self, mock_json, mock_subprocess_popen):
+        scenario = utils.VMScenario(self.context)
+
+        mock_subprocess_popen.return_value.communicate.return_value = (
+            "stdout", "stderr")
+
+        retval = scenario._process_agent_commands_output(
+            "reduction_command", "run_result")
+
+        mock_json.dumps.assert_called_once_with(
+            "run_result", default=utils.default_serialize)
+
+        mock_subprocess_popen.assert_called_once_with(
+            "reduction_command",
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        mock_subprocess_popen.return_value.communicate.assert_called_once_with(
+            mock_json.dumps.return_value)
+
+        mock_json.loads.assert_called_once_with("stdout")
+
+        self.assertEqual(
+            mock_json.loads.return_value,
+            retval)
+
+    def test__agent_run_command(self):
+        scenario = utils.VMScenario(self.context)
+
+        scenario._wait_for_agent_ping = mock.Mock()
+        scenario._agent_run_command_wait = mock.Mock()
+
+        servers_with_ips = [
+            (0, {"ip": "foobar"}, "there"),
+            (0, None, "here"),
+            (0, None, "onmoon")
+        ]
+        command_with_args = "all your base belongs to us"
+
+        scenario._agent_run_command(
+            command_with_args,
+            servers_with_ips,
+            expected_runtime=137,
+            can_run_off=42)
+
+        scenario._wait_for_agent_ping.assert_called_once_with(
+            "http://foobar:8080", 3)
+
+        scenario._agent_run_command_wait.assert_called_once_with(
+            "http://foobar:8080", 3,
+            {
+                "path": [command_with_args],
+                "thread": "true",
+                "env": [
+                    "FIXED_IP0=there",
+                    "FIXED_IP1=here",
+                    "FIXED_IP2=onmoon",
+                    "AGENT_ID=None",
+                    "AGENTS_TOTAL=3"
+                ]
+            },
+            137, 42)
+
+    @mock.patch(VMTASKS_UTILS + ".time.sleep")
+    @mock.patch(VMTASKS_UTILS + ".requests")
+    def test__agent_run_command_wait(self, mock_requests, mock_time_sleep):
+        scenario = utils.VMScenario(self.context)
+
+        mock_requests.post.side_effect = [
+            mock.Mock(**{"json.return_value": x})
+            for x in [
+                [],  # commands
+                [  # tail
+                    {
+                        "agent": "foo",
+                        "stdout": "FORGET ABOUT YOUR ",
+                        "stderr": "DENIAL, DENIAL ",
+                    },
+                    {
+                        "agent": "bar",
+                        "stdout": "AND I'LL ",
+                        "stderr": "YOUR EARS ",
+                    }
+                ],
+                [],  # empty tail
+                [  # unfinished check
+                    {
+                        "agent": "foo",
+                        "exit_code": None
+                    },
+                    {
+                        "agent": "bar",
+                        "exit_code": None
+                    }
+                ],
+                [  # tail
+                    {
+                        "agent": "foo",
+                        "stdout": "HOUSE OF CARDS",
+                        "stderr": "DENIAL, DENIAL",
+                    },
+                    {
+                        "agent": "bar",
+                        "stdout": "DO MINE",
+                        "stderr": "SHOULD BE BURNING",
+                    }
+                ],
+                [],  # empty tail
+                [  # finished check
+                    {
+                        "agent": "foo",
+                        "exit_code": 63
+                    },
+                    {
+                        "agent": "bar",
+                        "exit_code": None
+                    }
+                ],
+            ]
+        ]
+
+        retval = scenario._agent_run_command_wait(
+            "foobar", 2, "barfoo", 137, 1)
+
+        mock_time_sleep.assert_called_once_with(137)
+
+        self.assertEqual({"foo": 63}, retval["exit_code"])
+
+        def check_content(fh, expected):
+            fh.seek(0)
+            self.assertEqual(expected.encode("utf-8"), fh.read())
+
+        check_content(
+            retval["stdout"]["foo"],
+            "FORGET ABOUT YOUR HOUSE OF CARDS")
+        check_content(
+            retval["stdout"]["bar"],
+            "AND I'LL DO MINE")
+        check_content(
+            retval["stderr"]["foo"],
+            "DENIAL, DENIAL DENIAL, DENIAL")
+        check_content(
+            retval["stderr"]["bar"],
+            "YOUR EARS SHOULD BE BURNING")
+
+    @mock.patch(VMTASKS_UTILS + ".requests")
+    def test__ping_agent(self, mock_requests):
+        scenario = utils.VMScenario(self.context)
+
+        mock_requests.get.return_value.json.return_value = "1234"
+        retval = scenario._ping_agent(("foobar", 42))
+
+        mock_requests.get.assert_called_once_with(
+            "foobar/ping?agents=42")
+
+        self.assertEqual("UP 4", retval)
+
+    @mock.patch(VMTASKS_UTILS + ".requests")
+    def test__ping_agent_down(self, mock_requests):
+        scenario = utils.VMScenario(self.context)
+
+        mock_requests.exceptions.RequestException = ValueError
+        mock_requests.get.side_effect = ValueError()
+        retval = scenario._ping_agent(("foobar", 42))
+
+        self.assertEqual("DOWN", retval)
+
+    def test__wait_for_agent_ping(self):
+        scenario = utils.VMScenario(self.context)
+
+        scenario._ping_agent = mock.Mock(return_value=True)
+
+        scenario._wait_for_agent_ping("foobar", 42)
+
+        self.mock_wait_for.mock.assert_called_once_with(
+            ("foobar", 42),
+            is_ready=self.mock_resource_is.mock.return_value,
+            timeout=CONF.benchmark.vm_agent_ping_timeout,
+            check_interval=CONF.benchmark.vm_agent_ping_poll_interval
+        )
+        self.mock_resource_is.mock.assert_called_once_with(
+            "UP 42", scenario._ping_agent)
+
+
+class ModuleTestCase(test.TestCase):
+    def test_default_serialize_name(self):
+        tf = utils.tempfile.NamedTemporaryFile()
+        retval = utils.default_serialize(tf)
+        self.assertEqual(tf.name, retval)
+
+    def test_default_serialize(self):
+        retval = utils.default_serialize(42)
+        self.assertEqual(42, retval)

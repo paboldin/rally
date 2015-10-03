@@ -13,11 +13,16 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import collections
+import json
 import subprocess
 import sys
+import tempfile
+import time
 
 import netaddr
 from oslo_config import cfg
+import requests
 import six
 
 from rally.common.i18n import _
@@ -40,11 +45,24 @@ VM_BENCHMARK_OPTS = [
                  help="Interval between checks when waiting for a VM to "
                  "become pingable"),
     cfg.FloatOpt("vm_ping_timeout", default=120.0,
-                 help="Time to wait for a VM to become pingable")]
+                 help="Time to wait for a VM to become pingable"),
+    cfg.FloatOpt("vm_agent_ping_poll_interval", default=5.0,
+                 help="Interval between checks when waiting for a VM agents "
+                 "to become pingable"),
+    cfg.FloatOpt("vm_agent_ping_timeout", default=600.0,
+                 help="Time to wait for a VM agents to become pingable")]
 
 CONF = cfg.CONF
 benchmark_group = cfg.OptGroup(name="benchmark", title="benchmark options")
 CONF.register_opts(VM_BENCHMARK_OPTS, group=benchmark_group)
+
+
+def default_serialize(obj):
+    try:
+        obj.flush()
+        return obj.name
+    except AttributeError:
+        return obj
 
 
 class VMScenario(nova_utils.NovaScenario, cinder_utils.CinderScenario):
@@ -166,6 +184,122 @@ class VMScenario(nova_utils.NovaScenario, cinder_utils.CinderScenario):
             timeout=CONF.benchmark.vm_ping_timeout,
             check_interval=CONF.benchmark.vm_ping_poll_interval
         )
+
+    @staticmethod
+    def _ping_agent(args):
+        http_url, agents = args
+        try:
+            pings = requests.get(http_url + "/ping?agents=%d" % agents).json()
+        except requests.exceptions.RequestException:
+            LOG.debug("MasterAgent %s is down." % http_url)
+            return "DOWN"
+        LOG.debug("%d agents is up through %s." % (len(pings), http_url))
+        return "UP %d" % len(pings)
+
+    @atomic.action_timer("vm.wait_for_agent_ping")
+    def _wait_for_agent_ping(self, http_url, expected_agents):
+        utils.wait_for(
+            (http_url, expected_agents),
+            is_ready=utils.resource_is("UP %d" % expected_agents,
+                                       self._ping_agent),
+            timeout=CONF.benchmark.vm_agent_ping_timeout,
+            check_interval=CONF.benchmark.vm_agent_ping_poll_interval
+        )
+
+    def _agent_run_command_wait(self, http_url, agents, command,
+                                expected_runtime, can_run_off):
+        LOG.debug("Running command %r on %d agent(s) via %s" % (
+            command, agents, http_url))
+
+        commands = requests.post(
+            http_url + "/command?agents=%d" % agents,
+            data=command,
+        ).json()
+
+        LOG.debug("Commands %r started on %s" % (commands, http_url))
+
+        if expected_runtime is not None:
+            time.sleep(expected_runtime)
+
+        run = {
+            "stdout": collections.defaultdict(tempfile.NamedTemporaryFile),
+            "stderr": collections.defaultdict(tempfile.NamedTemporaryFile),
+            "exit_code": {}
+        }
+
+        while True:
+            tails = requests.post(http_url + "/tail?agents=%d" % agents).json()
+
+            LOG.debug("Tailed %r" % tails)
+
+            updated = False
+            for tail in tails:
+                agent = tail["agent"]
+                for fd in "stdout", "stderr":
+                    if tail[fd]:
+                        run[fd][agent].write(tail[fd].encode("utf-8"))
+                        updated = True
+
+            if not updated:
+                checks = requests.post(
+                    http_url + "/check?agents=%d" % agents
+                ).json()
+
+                LOG.debug("Checking %r" % checks)
+
+                finished = 0
+                for check in checks:
+                    if check["exit_code"] is not None:
+                        finished += 1
+                        run["exit_code"][check["agent"]] = check["exit_code"]
+                if finished >= agents - can_run_off:
+                    break
+
+        return run
+
+    def _agent_run_command(self, command_with_args, servers_with_ips,
+                           expected_runtime=None, can_run_off=0):
+        fip = servers_with_ips[0][1]
+        http_url = "http://%s:8080" % fip["ip"]
+
+        agents = len(servers_with_ips)
+
+        self._wait_for_agent_ping(http_url, agents)
+
+        # TODO(pboldin): Should do better job moving requests out of this
+
+        env = ["FIXED_IP%d=%s" % (i, d[2])
+               for i, d in enumerate(servers_with_ips)]
+        env.append("AGENT_ID=None")
+        env.append("AGENTS_TOTAL=%d" % agents)
+
+        if not isinstance(command_with_args, list):
+            command_with_args = [command_with_args]
+
+        command = {
+            "path": command_with_args,
+            "thread": "true",
+            "env": env
+        }
+
+        return self._agent_run_command_wait(
+            http_url, agents, command, expected_runtime, can_run_off)
+
+    def _process_agent_commands_output(self, reduction_command, run_result):
+        stdin = json.dumps(run_result, default=default_serialize)
+        LOG.debug("Dumping %s into stdin." % stdin)
+
+        process = subprocess.Popen(
+            reduction_command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+
+        stdout, stderr = process.communicate(stdin)
+        LOG.debug("Got STDOUT:\n\n%s\n\nGot STDERR\n\n%s\n\n" %
+                  (stdout, stderr))
+
+        return json.loads(stdout)
 
     def _run_command(self, server_ip, port, username, password, command,
                      pkey=None):
