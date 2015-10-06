@@ -24,11 +24,9 @@ from tests.unit import test
 BASE = "rally.plugins.openstack.context.cleanup.manager"
 
 
-class SeekAndDestroyTestCase(test.TestCase):
+class SeekAndDestroyTestCase(test.ContextTestCase):
 
-    @mock.patch("%s.osclients.Clients" % BASE,
-                side_effect=[mock.MagicMock(), mock.MagicMock()])
-    def test__get_cached_client(self, mock_clients):
+    def test__get_cached_client(self):
         self.assertIsNone(manager.SeekAndDestroy._get_cached_client(None))
 
         users = [{"endpoint": "a"}, {"endpoint": "b"}]
@@ -65,13 +63,16 @@ class SeekAndDestroyTestCase(test.TestCase):
         self.assertEqual(0, mock_log.call_count)
 
     @mock.patch("%s.LOG" % BASE)
-    def test__delete_single_resource_timeout(self, mock_log):
+    @mock.patch("%s.time.time" % BASE)
+    def test__delete_single_resource_timeout(self, mock_time_time, mock_log):
 
         mock_resource = mock.MagicMock(_max_attempts=1, _timeout=0.02,
                                        _interval=0.025)
 
         mock_resource.delete.return_value = True
         mock_resource.is_deleted.side_effect = [False, False, True]
+
+        mock_time_time.side_effect = [0.0, 0.01, 0.025]
 
         manager.SeekAndDestroy(None, None, None)._delete_single_resource(
             mock_resource)

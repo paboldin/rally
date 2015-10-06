@@ -20,16 +20,15 @@ from tests.unit import test
 CTX = "rally.plugins.openstack.context"
 
 
-class ExistingUserTestCase(test.TestCase):
+class ExistingUserTestCase(test.ContextTestCase):
 
-    @mock.patch("%s.keystone.existing_users.osclients.Clients" % CTX)
     @mock.patch("%s.keystone.existing_users.objects.Endpoint" % CTX)
-    def test_setup(self, mock_endpoint, mock_clients):
-        user1 = mock.MagicMock(tenant_id="1")
-        user2 = mock.MagicMock(tenant_id="1")
-        user3 = mock.MagicMock(tenant_id="2")
+    def test_setup(self, mock_endpoint):
+        user1 = mock.MagicMock(name="user1", tenant_id="1")
+        user2 = mock.MagicMock(name="user2", tenant_id="1")
+        user3 = mock.MagicMock(name="user3", tenant_id="2")
 
-        mock_clients.return_value.keystone.side_effect = [
+        self.clients("keystone").side_effect = [
             user1, user2, user3
         ]
 

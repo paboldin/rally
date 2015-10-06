@@ -51,6 +51,7 @@ class ExistingUsers(users.UserContextMixin, context.Context):
 
         for user in self.config:
             user_endpoint = objects.Endpoint(**user)
+            print osclients.Clients(user_endpoint).keystone
             user_kclient = osclients.Clients(user_endpoint).keystone()
 
             if user_kclient.tenant_id not in self.context["tenants"]:

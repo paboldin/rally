@@ -60,7 +60,7 @@ class UserContextMixinTestCase(test.TestCase):
         )
 
 
-class UserGeneratorTestCase(test.ScenarioTestCase):
+class UserGeneratorTestCase(test.ContextTestCase):
 
     tenants_num = 1
     users_per_tenant = 5
@@ -69,8 +69,6 @@ class UserGeneratorTestCase(test.ScenarioTestCase):
 
     def setUp(self):
         super(UserGeneratorTestCase, self).setUp()
-        self.osclients_patcher = mock.patch("%s.osclients" % CTX)
-        self.osclients = self.osclients_patcher.start()
         self.context.update({
             "config": {
                 "users": {
@@ -79,14 +77,10 @@ class UserGeneratorTestCase(test.ScenarioTestCase):
                     "resource_management_workers": self.threads,
                 }
             },
-            "admin": {"endpoint": mock.MagicMock()},
+            "admin": {"endpoint": "admin_endpoint"},
             "users": [],
             "task": {"uuid": "task_id"}
         })
-
-    def tearDown(self):
-        self.osclients_patcher.stop()
-        super(UserGeneratorTestCase, self).tearDown()
 
     def test_is_user_context_mixin_subclass(self):
         self.assertTrue(
@@ -95,7 +89,7 @@ class UserGeneratorTestCase(test.ScenarioTestCase):
     @mock.patch("%s.network.wrap" % CTX)
     def test__remove_default_security_group_not_needed(self, mock_wrap):
         services = {"compute": consts.Service.NOVA}
-        self.osclients.Clients().services.return_value = services
+        self.admin_clients("services")._override = services
         user_generator = users.UserGenerator(self.context)
         user_generator._remove_default_security_group()
         self.assertFalse(mock_wrap.called)
@@ -108,16 +102,16 @@ class UserGeneratorTestCase(test.ScenarioTestCase):
 
         user_generator = users.UserGenerator(self.context)
 
-        admin_clients = mock.Mock()
-        admin_clients.services.return_value = {
+        self.admin_clients("services").return_value = {
             "compute": consts.Service.NOVA,
-            "neutron": consts.Service.NEUTRON}
-        user_clients = [mock.Mock(), mock.Mock()]
-        self.osclients.Clients.side_effect = [admin_clients] + user_clients
+            "neutron": consts.Service.NEUTRON
+        }
 
         user_generator._remove_default_security_group()
 
-        mock_wrap.assert_called_once_with(admin_clients, self.context["task"])
+        mock_wrap.assert_called_once_with(
+            self.context_client("admin_endpoint"),
+            self.context["task"])
         net_wrapper.supports_extension.assert_called_once_with(
             "security-group")
 

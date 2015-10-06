@@ -70,6 +70,13 @@ class ScenarioTestCase(TestCase):
     benchmark_utils = "rally.task.utils"
     patch_benchmark_utils = True
 
+    def get_test_context(self):
+        return {
+            "task": {
+                "uuid": str(uuid.uuid4())
+            }
+        }
+
     def client_factory(self, client_type, version=None, admin=False):
         """Create a new client object."""
         return mock.MagicMock(client_type=client_type,
@@ -136,7 +143,7 @@ class ScenarioTestCase(TestCase):
         for patcher in self._client_mocks:
             patcher.start()
 
-        self.context = get_test_context()
+        self.context = self.get_test_context()
 
     def tearDown(self):
         for patcher in self._client_mocks:
@@ -199,11 +206,3 @@ class FakeClientsScenarioTestCase(ScenarioTestCase):
     def setUp(self):
         super(FakeClientsScenarioTestCase, self).setUp()
         self._fake_clients = fakes.FakeClients()
-
-
-def get_test_context():
-    return {
-        "task": {
-            "uuid": str(uuid.uuid4())
-        }
-    }

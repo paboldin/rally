@@ -25,7 +25,7 @@ SCN = "rally.plugins.openstack.scenarios"
 TYP = "rally.task.types"
 
 
-class EC2ServerGeneratorTestCase(test.TestCase):
+class EC2ServerGeneratorTestCase(test.ContextTestCase):
 
     def _gen_tenants_and_users(self, tenants_count, users_per_tenant):
         tenants = {}
@@ -62,8 +62,7 @@ class EC2ServerGeneratorTestCase(test.TestCase):
                 return_value=[fakes.FakeServer(id=str(i)) for i in range(5)])
     @mock.patch("%s.EC2ImageResourceType.transform" % TYP,
                 return_value=mock.MagicMock())
-    @mock.patch("%s.servers.osclients" % CTX, return_value=fakes.FakeClients())
-    def test_setup(self, mock_osclients,
+    def test_setup(self,
                    mock_ec2_image_resource_type_transform,
                    mock_ec2_scenario__boot_servers):
 
@@ -86,9 +85,8 @@ class EC2ServerGeneratorTestCase(test.TestCase):
         servers_ctx.setup()
         self.assertEqual(new_context, servers_ctx.context)
 
-    @mock.patch("%s.servers.osclients" % CTX)
     @mock.patch("%s.servers.resource_manager.cleanup" % CTX)
-    def test_cleanup(self, mock_cleanup, mock_osclients):
+    def test_cleanup(self, mock_cleanup):
 
         tenants_count = 2
         users_per_tenant = 5
