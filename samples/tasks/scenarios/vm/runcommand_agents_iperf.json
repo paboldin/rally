@@ -1,0 +1,81 @@
+{
+  "VMTasks.runcommand_agents": [
+    {
+      "args": {
+        "actor_command": ["/usr/bin/start_iperf.sh", "-t", "60", "-P", "3"],
+        "reduction_command": [
+          "/usr/bin/python",
+          "samples/tasks/scenarios/vm/process_iperf.py"
+        ],
+        "expected_runtime": 70
+      },
+      "runner": {
+        "type": "constant",
+        "concurrency": 1,
+        "timeout": 3000,
+        "times": 1
+      },
+      "context": {
+        "flavors": [
+          {
+            "name": "vm.ubuntu",
+            "ram": 512,
+            "disk": 4
+          }
+        ],
+        "image_command_customizer": {
+          "username": "root",
+          "userdata": "#cloud-config\ndisable_root: 0\nssh_pwauth: 1",
+          "commands": [
+            {
+              "local_path": "samples/tasks/contexts/vm/agent_installer.sh",
+              "remote_path": "./agent_installer.sh",
+              "command_args": ["preinstall"]
+            },
+            {
+              "local_path": "rally/plugins/agent/agent.py",
+              "remote_path": ["/usr/bin/python", "./agent.py"],
+              "command_args": ["--help"]
+            },
+            {
+              "local_path": "rally/plugins/agent/masteragent.py",
+              "remote_path": ["/usr/bin/python", "./masteragent.py"],
+              "command_args": ["--help"]
+            },
+            {
+              "remote_path": "./agent_installer.sh",
+              "command_args": ["install"]
+            },
+            {
+              "local_path": "samples/tasks/contexts/vm/iperf_installer.sh",
+              "remote_path": "./iperf_installer.sh"
+            }
+          ],
+          "flavor": {
+            "name": "^vm.ubuntu$"
+          },
+          "image": {
+            "name": "^ubuntu$"
+          }
+        },
+        "network": {},
+        "servers_ext": {
+          "userdata": "#cloud-config\nwrite_files:\n-   content:  |\n      # Master Agent Host\n\n      ZMQ_MASTER_AGENT_HOST={servers_with_ips[0][2]}\n      AGENT_ID={server_num}\n    path: /opt/rally-agent/master-agent-host\n",
+          "flavor": {
+            "name": "^vm.ubuntu$"
+          },
+          "placement_policy": "anti-affinity",
+          "servers_per_tenant": "hypervisors",
+          "image": {
+            "name": "^rally_ctx_custom_image_"
+          },
+          "floating_ips": "once"
+        },
+        "users": {
+          "users_per_tenant": 1,
+          "tenants": 1
+        }
+      }
+    }
+  ]
+}
