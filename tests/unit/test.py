@@ -213,3 +213,20 @@ def get_test_context():
             "uuid": str(uuid.uuid4())
         }
     }
+
+
+class NamedMock(mock.Mock):
+    """Class for a Mock object with a proper 'name' attribute.
+
+    Mock and MagicMock swallow "name" keyword argument as the name of
+    the object itself. Thus, a workaround is required to enable to
+    actually specify mocked object name.
+
+    Usage:
+    >>> NamedMock(name_="test").name
+    ... "test"
+    """
+    def __getattr__(self, attr):
+        if attr == "name":
+            return self.name_
+        return super(NamedMock, self).__getattr__(attr)
