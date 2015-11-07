@@ -167,7 +167,8 @@ class BaseCustomImageGenerator(context.Context,
             vm_scenario._stop_server(server)
 
             LOG.debug("Creating snapshot for %r", server)
-            custom_image = vm_scenario._create_image(server).to_dict()
+            custom_image = vm_scenario._create_image(
+                server, name=self.generate_random_name()).to_dict()
         finally:
             vm_scenario._delete_server_with_fip(server, fip)
 

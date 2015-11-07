@@ -465,7 +465,7 @@ class NovaScenario(scenario.OpenStackScenario):
         )
 
     @atomic.action_timer("nova.create_image")
-    def _create_image(self, server):
+    def _create_image(self, server, name=None):
         """Create an image from the given server
 
         Uses the server name to name the created image. Returns when the image
@@ -475,8 +475,9 @@ class NovaScenario(scenario.OpenStackScenario):
 
         :returns: Created image object
         """
-        image_uuid = self.clients("nova").servers.create_image(server,
-                                                               server.name)
+        if name is None:
+            name = server.name
+        image_uuid = self.clients("nova").servers.create_image(server, name)
         image = self.clients("nova").images.get(image_uuid)
         check_interval = CONF.benchmark.nova_server_image_create_poll_interval
         image = utils.wait_for(
